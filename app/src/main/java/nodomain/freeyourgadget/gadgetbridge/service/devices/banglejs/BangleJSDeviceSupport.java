@@ -31,6 +31,7 @@ import static nodomain.freeyourgadget.gadgetbridge.activities.devicesettings.Dev
 import static nodomain.freeyourgadget.gadgetbridge.database.DBHelper.getUser;
 import static nodomain.freeyourgadget.gadgetbridge.devices.banglejs.BangleJSConstants.PREF_BANGLEJS_ACTIVITY_FULL_SYNC_START;
 import static nodomain.freeyourgadget.gadgetbridge.devices.banglejs.BangleJSConstants.PREF_BANGLEJS_ACTIVITY_FULL_SYNC_STATUS;
+import static nodomain.freeyourgadget.gadgetbridge.devices.banglejs.BangleJSConstants.PREF_BANGLEJS_NOTIFICATION_MISSED_CALL_ENABLE;
 
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
@@ -173,6 +174,8 @@ public class BangleJSDeviceSupport extends AbstractBTLEDeviceSupport {
     private int realtimeHRMInterval = 10;
     /// Last battery percentage reported (or -1) to help with smoothing reported battery levels
     private int lastBatteryPercent = -1;
+
+    private boolean isMissedCall = false;
 
     private final LimitedQueue<Integer, Long> mNotificationReplyAction = new LimitedQueue<>(16);
 
@@ -1573,6 +1576,46 @@ public class BangleJSDeviceSupport extends AbstractBTLEDeviceSupport {
     @Override
     public void onSetCallState(CallSpec callSpec) {
         try {
+            final boolean enableMissedCall = GBApplication.getDeviceSpecificSharedPrefs(gbDevice.getAddress()).getBoolean(PREF_BANGLEJS_NOTIFICATION_MISSED_CALL_ENABLE, false);
+            switch (callSpec.command) {
+                case CallSpec.CALL_INCOMING:
+                    // possible missed call
+                    isMissedCall = true;
+                    break;
+                case CallSpec.CALL_END:
+                    if (isMissedCall) {
+                        LOG.info("Missed call");
+                        isMissedCall = false;
+                        if (enableMissedCall) {
+                            NotificationSpec notificationSpec = new NotificationSpec();
+                            notificationSpec.sourceName = "Incoming call";
+                            notificationSpec.subject = "Missed call";
+                            notificationSpec.title = "Missed call";
+                            if (callSpec.name != null) {
+                                notificationSpec.sender = callSpec.name;
+                                notificationSpec.body = callSpec.name + "\n" + callSpec.number;
+                            } else {
+                                notificationSpec.sender = callSpec.number;
+                                notificationSpec.body = callSpec.number;
+                            }
+                            new Thread(() ->{
+                                try {
+                                    // Message gets lost when sending directly together with call end
+                                    Thread.sleep(1000);
+                                    onNotification(notificationSpec);
+                                } catch (InterruptedException e) {
+                                    LOG.info("Sleep for sending missed call message interrupted", e);
+                                }
+                            }).start();
+                        } else {
+                            LOG.info("Ignoring missed call");
+                        }
+                    }
+                    break;
+                default:
+                    isMissedCall = false;
+                    break;
+            }
             JSONObject o = new JSONObject();
             o.put("t", "call");
             String cmdName = "";
