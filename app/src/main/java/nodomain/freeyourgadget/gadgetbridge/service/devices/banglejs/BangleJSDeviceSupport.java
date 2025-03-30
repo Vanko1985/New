@@ -49,6 +49,7 @@ import android.location.Location;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Base64;
 import android.widget.Toast;
 
@@ -176,6 +177,7 @@ public class BangleJSDeviceSupport extends AbstractBTLEDeviceSupport {
     private int lastBatteryPercent = -1;
 
     private boolean isMissedCall = false;
+    private final Handler handler = new Handler();
 
     private final LimitedQueue<Integer, Long> mNotificationReplyAction = new LimitedQueue<>(16);
 
@@ -214,6 +216,7 @@ public class BangleJSDeviceSupport extends AbstractBTLEDeviceSupport {
         stopGlobalUartReceiver();
         stopLocationUpdate();
         stopRequestQueue();
+        handler.removeCallbacksAndMessages(null);
     }
 
     private void stopGlobalUartReceiver(){
@@ -1588,25 +1591,25 @@ public class BangleJSDeviceSupport extends AbstractBTLEDeviceSupport {
                         isMissedCall = false;
                         if (enableMissedCall) {
                             NotificationSpec notificationSpec = new NotificationSpec();
-                            notificationSpec.sourceName = "Incoming call";
-                            notificationSpec.subject = "Missed call";
-                            notificationSpec.title = "Missed call";
-                            if (callSpec.name != null) {
-                                notificationSpec.sender = callSpec.name;
-                                notificationSpec.body = callSpec.name + "\n" + callSpec.number;
-                            } else {
+                            notificationSpec.sourceName = getContext().getString(R.string.banglejs_notification_missed_call_source);
+                            notificationSpec.title =  getContext().getString(R.string.banglejs_notification_missed_call_title);
+                            notificationSpec.subject = getContext().getString(R.string.banglejs_notification_missed_call_title);
+                            if (callSpec.name == null && callSpec.number == null) {
+                                notificationSpec.body = getContext().getString(R.string.banglejs_notification_missed_call_suppressed_caller_id);
+                            }else if (callSpec.name == null) {
                                 notificationSpec.sender = callSpec.number;
                                 notificationSpec.body = callSpec.number;
+                                notificationSpec.phoneNumber = callSpec.number;
+                            } else {
+                                notificationSpec.sender = callSpec.name;
+                                notificationSpec.body = callSpec.name + "\n" + callSpec.number;
+                                notificationSpec.phoneNumber = callSpec.number;
                             }
-                            new Thread(() ->{
-                                try {
-                                    // Message gets lost when sending directly together with call end
-                                    Thread.sleep(1000);
-                                    onNotification(notificationSpec);
-                                } catch (InterruptedException e) {
-                                    LOG.info("Sleep for sending missed call message interrupted", e);
-                                }
-                            }).start();
+
+                            handler.postDelayed(() -> {
+                                onNotification(notificationSpec);
+                            }, 1000L);
+
                         } else {
                             LOG.info("Ignoring missed call");
                         }
